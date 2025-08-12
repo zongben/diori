@@ -1,5 +1,4 @@
 import { Container, Inject } from "./src/container";
-(Symbol.metadata as any) ??= Symbol("Symbol.metadata");
 
 const TOKEN = {
   logger: Symbol("logger"),
