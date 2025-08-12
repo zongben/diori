@@ -43,7 +43,6 @@ class LogService {
   @Inject(TOKEN.depA)
   private svcA!: DepA;
 
-
   execLog() {
     this.logger.log();
     this.svcA.doA();

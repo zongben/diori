@@ -44,7 +44,7 @@ export class Container {
     const onStack = new Set<symbol>();
     const path: symbol[] = [];
 
-    const dfs = (token: symbol): void => {
+    const dfs = (token: symbol): boolean => {
       if (onStack.has(token)) {
         const cycleStartIndex = path.indexOf(token);
         const cyclePath = path
@@ -54,25 +54,29 @@ export class Container {
         throw new Error(`Cycle detected: ${cyclePath} -> ${String(token)}`);
       }
 
-      if (visited.has(token)) return;
+      if (visited.has(token)) return true;
+
+      const ctx = this.#map.get(token);
+      if (!ctx) return false;
 
       visited.add(token);
       onStack.add(token);
       path.push(token);
 
-      const ctx = this.#map.get(token);
-
-      if (ctx) {
-        for (const depToken of ctx.dep) {
-          if (this.#map.has(depToken)) {
-            dfs(depToken);
-          }
+      for (const depToken of ctx.dep) {
+        const nodeResult = dfs(depToken);
+        if (!nodeResult) {
+          visited.delete(token);
+          onStack.delete(token);
+          path.pop();
+          return false;
         }
       }
 
       onStack.delete(token);
       path.pop();
-      if (ctx) ctx.cycleChecked = true;
+      ctx.cycleChecked = true;
+      return true;
     };
 
     for (const [token, ctx] of this.#map.entries()) {
@@ -107,11 +111,6 @@ export class Container {
   }
 
   #buildPlans() {
-    const allCycleChecked = Array.from(this.#map.values()).every(
-      (ctx) => ctx.cycleChecked,
-    );
-    if (!allCycleChecked) return;
-
     for (const [token, ctx] of this.#map.entries()) {
       if (ctx.cycleChecked) {
         this.#plan.set(token, this.#topoSortFrom(token));
@@ -157,11 +156,9 @@ export class Container {
 
     const plan = this.#plan.get(token);
     if (!plan) throw new Error(`Plan not found: ${String(token)}`);
-    console.log(plan);
 
     for (const dep of plan) {
       const meta = dep.ctor[Symbol.metadata];
-      console.log(meta);
       if (dep.type === "transient") {
         const depInstance = this.#transientMap.get(dep.token);
         if (depInstance) {
