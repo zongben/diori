@@ -7,7 +7,7 @@ export type Newable<
 
 type ScopeType = "transient" | "request" | "singleton";
 
-type ResolveContext = {
+type DepContext = {
   ctor: Newable;
   type: ScopeType;
   dep: symbol[];
@@ -18,17 +18,16 @@ type MetaData = {
   token: symbol;
 };
 
-type TopoContext = {
+type PlanContext = {
   token: symbol;
   ctor: Newable;
   type: ScopeType;
 };
 
 export class Container {
-  #map = new Map<symbol, ResolveContext>();
+  #map = new Map<symbol, DepContext>();
   #singletonMap = new Map<symbol, any>();
-  #transientMap = new Map<symbol, Function>();
-  #plan = new Map<symbol, TopoContext[]>();
+  #plan = new Map<symbol, Set<PlanContext>>();
 
   #getDep(ctor: Newable): symbol[] {
     const metadata = ctor[Symbol.metadata];
@@ -84,9 +83,9 @@ export class Container {
     }
   }
 
-  #topoSortFrom(token: symbol): TopoContext[] {
+  #topoSortFrom(token: symbol): PlanContext[] {
     const visited = new Set<symbol>();
-    const result: TopoContext[] = [];
+    const result: PlanContext[] = [];
 
     const dfs = (curToken: symbol) => {
       if (visited.has(curToken)) return;
@@ -107,13 +106,13 @@ export class Container {
     };
 
     dfs(token);
-    return result;
+    return result.reverse();
   }
 
   #buildPlans() {
     for (const [token, ctx] of this.#map.entries()) {
       if (ctx.cycleChecked) {
-        this.#plan.set(token, this.#topoSortFrom(token));
+        this.#plan.set(token, new Set(this.#topoSortFrom(token)));
       }
     }
   }
@@ -155,24 +154,37 @@ export class Container {
     const requestMap = new Map<symbol, any>();
 
     const plan = this.#plan.get(token);
-    if (!plan) throw new Error(`Plan not found: ${String(token)}`);
+    if (!plan) throw Error(`Plan is not found ${String(token)}`);
 
-    for (const dep of plan) {
-      const meta = dep.ctor[Symbol.metadata];
-      if (dep.type === "transient") {
-        const depInstance = this.#transientMap.get(dep.token);
-        if (depInstance) {
-        }
-
-        if (meta) {
-          for (const key of Object.getOwnPropertyNames(meta)) {
-            // const depInstance;
-          }
-        }
+    for (const ctx of plan) {
+      if (ctx.type === "transient") {
+        return this.#createInstance(ctx) as T;
+      } else if (ctx.type === "singleton") {
+        return this.#createInstance(ctx, this.#singletonMap);
+      } else if (ctx.type === "request") {
+        return this.#createInstance(ctx, requestMap);
       }
     }
 
-    return {} as T;
+    return this.resolve(token);
+  }
+
+  #createInstance(ctx: PlanContext, scope?: Map<symbol, any>) {
+    if (scope?.has(ctx.token)) return scope.get(ctx.token);
+
+    const instance = new ctx.ctor();
+    const meta = ctx.ctor[Symbol.metadata] ?? {};
+
+    for (const [key, m] of Object.entries(meta)) {
+      const depToken = (m as any).token as symbol;
+      Object.defineProperty(instance, key, {
+        value: this.resolve(depToken),
+        writable: true,
+      });
+    }
+
+    scope?.set(ctx.token, instance);
+    return instance;
   }
 }
 
