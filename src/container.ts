@@ -5,9 +5,11 @@ export type Newable<
   TArgs extends unknown[] = any[],
 > = new (...args: TArgs) => TInstance;
 
+type ScopeType = "transient" | "request" | "singleton";
+
 type ResolveContext = {
   ctor: Newable;
-  type: "transient" | "request" | "singleton";
+  type: ScopeType;
   dep: symbol[];
   cycleChecked: boolean;
 };
@@ -16,8 +18,17 @@ type MetaData = {
   token: symbol;
 };
 
+type TopoContext = {
+  token: symbol;
+  ctor: Newable;
+  type: ScopeType;
+};
+
 export class Container {
   #map = new Map<symbol, ResolveContext>();
+  #singletonMap = new Map<symbol, any>();
+  #transientMap = new Map<symbol, Function>();
+  #plan = new Map<symbol, TopoContext[]>();
 
   #getDep(ctor: Newable): symbol[] {
     const metadata = ctor[Symbol.metadata];
@@ -69,6 +80,45 @@ export class Container {
     }
   }
 
+  #topoSortFrom(token: symbol): TopoContext[] {
+    const visited = new Set<symbol>();
+    const result: TopoContext[] = [];
+
+    const dfs = (curToken: symbol) => {
+      if (visited.has(curToken)) return;
+      visited.add(curToken);
+
+      const ctx = this.#map.get(curToken);
+      if (!ctx || !ctx.cycleChecked) return;
+
+      for (const depToken of ctx.dep) {
+        dfs(depToken);
+      }
+
+      result.push({
+        token: curToken,
+        ctor: ctx.ctor,
+        type: ctx.type,
+      });
+    };
+
+    dfs(token);
+    return result;
+  }
+
+  #buildPlans() {
+    const allCycleChecked = Array.from(this.#map.values()).every(
+      (ctx) => ctx.cycleChecked,
+    );
+    if (!allCycleChecked) return;
+
+    for (const [token, ctx] of this.#map.entries()) {
+      if (ctx.cycleChecked) {
+        this.#plan.set(token, this.#topoSortFrom(token));
+      }
+    }
+  }
+
   addTransient(token: symbol, ctor: Newable) {
     this.#map.set(token, {
       ctor,
@@ -77,6 +127,7 @@ export class Container {
       cycleChecked: false,
     });
     this.#depCycleDetect();
+    this.#buildPlans();
   }
 
   addRequest(token: symbol, ctor: Newable) {
@@ -87,6 +138,7 @@ export class Container {
       cycleChecked: false,
     });
     this.#depCycleDetect();
+    this.#buildPlans();
   }
 
   addSingleton(token: symbol, ctor: Newable) {
@@ -97,28 +149,33 @@ export class Container {
       cycleChecked: false,
     });
     this.#depCycleDetect();
+    this.#buildPlans();
   }
 
   resolve<T = unknown>(token: symbol): T {
-    const obj = this.#map.get(token);
-    if (!obj) throw new Error(`Token not found: ${String(token)}`);
+    const requestMap = new Map<symbol, any>();
 
-    const ctor = new obj.ctor() as T;
+    const plan = this.#plan.get(token);
+    if (!plan) throw new Error(`Plan not found: ${String(token)}`);
+    console.log(plan);
 
-    const meta = obj.ctor[Symbol.metadata];
-    if (!meta) return ctor;
+    for (const dep of plan) {
+      const meta = dep.ctor[Symbol.metadata];
+      console.log(meta);
+      if (dep.type === "transient") {
+        const depInstance = this.#transientMap.get(dep.token);
+        if (depInstance) {
+        }
 
-    for (const key of Object.getOwnPropertyNames(meta)) {
-      const depToken = (meta[key] as MetaData).token;
-      let depCtor: any = {};
-      depCtor = this.resolve(depToken);
-      Object.defineProperty(ctor, key, {
-        value: depCtor,
-        writable: true,
-      });
+        if (meta) {
+          for (const key of Object.getOwnPropertyNames(meta)) {
+            // const depInstance;
+          }
+        }
+      }
     }
 
-    return ctor;
+    return {} as T;
   }
 }
 
