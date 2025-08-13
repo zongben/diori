@@ -1,4 +1,4 @@
-import { Container, Inject } from "./src/container";
+import { Container, Inject } from "../src/container";
 
 const TOKEN = {
   logger: Symbol("logger"),
@@ -9,43 +9,49 @@ const TOKEN = {
 };
 
 class Logger {
-  @Inject(TOKEN.depB)
-  depB!: DepB;
-
   log() {
     console.log("logger log");
   }
 }
 
 class DepA {
-  @Inject(TOKEN.depB)
-  depB!: DepB;
-
   @Inject(TOKEN.depC)
   depC!: DepC;
 
-  doA() {
-    console.log("A is doing");
+  execA() {
+    console.log("A exec");
+    this.depC.get();
   }
 }
 
 class DepB {
   @Inject(TOKEN.depC)
   depC!: DepC;
+
+  execB() {
+    console.log("B exec");
+    this.depC.get();
+  }
 }
 
-class DepC {}
+class DepC {
+  index: number = 0;
+
+  get() {
+    console.log(this.index++);
+  }
+}
 
 class LogService {
-  @Inject(TOKEN.logger)
-  private logger!: Logger;
-
   @Inject(TOKEN.depA)
-  private svcA!: DepA;
+  depA!: DepA;
 
-  execLog() {
-    this.logger.log();
-    this.svcA.doA();
+  @Inject(TOKEN.depB)
+  depB!: DepB;
+
+  exec() {
+    this.depA.execA();
+    this.depB.execB();
   }
 }
 
@@ -54,7 +60,10 @@ container.addTransient(TOKEN.logger, Logger);
 container.addTransient(TOKEN.service, LogService);
 container.addTransient(TOKEN.depA, DepA);
 container.addTransient(TOKEN.depB, DepB);
-container.addTransient(TOKEN.depC, DepC);
+container.addRequest(TOKEN.depC, DepC);
 
 const svc = container.resolve<LogService>(TOKEN.service);
-svc.execLog();
+svc.exec();
+
+const svc2 = container.resolve<LogService>(TOKEN.service);
+svc2.exec();

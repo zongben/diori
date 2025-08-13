@@ -18,172 +18,97 @@ type MetaData = {
   token: symbol;
 };
 
-type PlanContext = {
-  token: symbol;
-  ctor: Newable;
-  type: ScopeType;
-};
-
 export class Container {
   #map = new Map<symbol, DepContext>();
   #singletonMap = new Map<symbol, any>();
-  #plan = new Map<symbol, Set<PlanContext>>();
 
   #getDep(ctor: Newable): symbol[] {
-    const metadata = ctor[Symbol.metadata];
-    if (!metadata) return [];
-
-    return Object.getOwnPropertyNames(metadata).map(
-      (key) => (metadata[key] as MetaData).token,
-    );
+    return Object.values(ctor[Symbol.metadata] ?? {})
+      .filter((m): m is MetaData => !!(m as MetaData).token)
+      .map((m) => m.token);
   }
 
   #depCycleDetect() {
     const visited = new Set<symbol>();
-    const onStack = new Set<symbol>();
+    const stack = new Set<symbol>();
     const path: symbol[] = [];
 
-    const dfs = (token: symbol): boolean => {
-      if (onStack.has(token)) {
-        const cycleStartIndex = path.indexOf(token);
-        const cyclePath = path
-          .slice(cycleStartIndex)
-          .map((s) => String(s))
-          .join(" -> ");
-        throw new Error(`Cycle detected: ${cyclePath} -> ${String(token)}`);
+    const dfs = (token: symbol) => {
+      if (stack.has(token)) {
+        const cycle = path.slice(path.indexOf(token)).map(String).join(" -> ");
+        throw new Error(`Cycle detected: ${cycle} -> ${String(token)}`);
       }
-
-      if (visited.has(token)) return true;
+      if (visited.has(token)) return;
 
       const ctx = this.#map.get(token);
-      if (!ctx) return false;
+      if (!ctx) return;
 
       visited.add(token);
-      onStack.add(token);
+      stack.add(token);
       path.push(token);
 
-      for (const depToken of ctx.dep) {
-        const nodeResult = dfs(depToken);
-        if (!nodeResult) {
-          visited.delete(token);
-          onStack.delete(token);
-          path.pop();
-          return false;
-        }
-      }
+      for (const dep of ctx.dep) dfs(dep);
 
-      onStack.delete(token);
+      stack.delete(token);
       path.pop();
       ctx.cycleChecked = true;
-      return true;
     };
 
-    for (const [token, ctx] of this.#map.entries()) {
+    for (const [token, ctx] of this.#map) {
       if (!ctx.cycleChecked) dfs(token);
     }
   }
 
-  #topoSortFrom(token: symbol): PlanContext[] {
-    const visited = new Set<symbol>();
-    const result: PlanContext[] = [];
-
-    const dfs = (curToken: symbol) => {
-      if (visited.has(curToken)) return;
-      visited.add(curToken);
-
-      const ctx = this.#map.get(curToken);
-      if (!ctx || !ctx.cycleChecked) return;
-
-      for (const depToken of ctx.dep) {
-        dfs(depToken);
-      }
-
-      result.push({
-        token: curToken,
-        ctor: ctx.ctor,
-        type: ctx.type,
-      });
-    };
-
-    dfs(token);
-    return result.reverse();
-  }
-
-  #buildPlans() {
-    for (const [token, ctx] of this.#map.entries()) {
-      if (ctx.cycleChecked) {
-        this.#plan.set(token, new Set(this.#topoSortFrom(token)));
-      }
-    }
+  #register(token: symbol, ctor: Newable, type: ScopeType) {
+    this.#map.set(token, {
+      ctor,
+      dep: this.#getDep(ctor),
+      type,
+      cycleChecked: false,
+    });
+    this.#depCycleDetect();
   }
 
   addTransient(token: symbol, ctor: Newable) {
-    this.#map.set(token, {
-      ctor,
-      dep: this.#getDep(ctor),
-      type: "transient",
-      cycleChecked: false,
-    });
-    this.#depCycleDetect();
-    this.#buildPlans();
+    this.#register(token, ctor, "transient");
   }
 
   addRequest(token: symbol, ctor: Newable) {
-    this.#map.set(token, {
-      ctor,
-      dep: this.#getDep(ctor),
-      type: "request",
-      cycleChecked: false,
-    });
-    this.#depCycleDetect();
-    this.#buildPlans();
+    this.#register(token, ctor, "request");
   }
 
   addSingleton(token: symbol, ctor: Newable) {
-    this.#map.set(token, {
-      ctor,
-      dep: this.#getDep(ctor),
-      type: "singleton",
-      cycleChecked: false,
-    });
-    this.#depCycleDetect();
-    this.#buildPlans();
+    this.#register(token, ctor, "singleton");
   }
 
   resolve<T = unknown>(token: symbol): T {
-    const requestMap = new Map<symbol, any>();
-
-    const plan = this.#plan.get(token);
-    if (!plan) throw Error(`Plan is not found ${String(token)}`);
-
-    for (const ctx of plan) {
-      if (ctx.type === "transient") {
-        return this.#createInstance(ctx) as T;
-      } else if (ctx.type === "singleton") {
-        return this.#createInstance(ctx, this.#singletonMap);
-      } else if (ctx.type === "request") {
-        return this.#createInstance(ctx, requestMap);
-      }
-    }
-
-    return this.resolve(token);
+    return this.#innerResolve(token, new Map<symbol, any>());
   }
 
-  #createInstance(ctx: PlanContext, scope?: Map<symbol, any>) {
-    if (scope?.has(ctx.token)) return scope.get(ctx.token);
+  #innerResolve(token: symbol, requestMap: Map<symbol, any>) {
+    const ctx = this.#map.get(token);
+    if (!ctx) throw Error(`${String(token)} is not registered`);
+
+    const scope =
+      ctx.type === "singleton"
+        ? this.#singletonMap
+        : ctx.type === "request"
+          ? requestMap
+          : undefined;
+
+    if (scope?.has(token)) return scope.get(token);
 
     const instance = new ctx.ctor();
     const meta = ctx.ctor[Symbol.metadata] ?? {};
-
     for (const [key, m] of Object.entries(meta)) {
-      const depToken = (m as any).token as symbol;
+      const depToken = (m as MetaData).token;
       Object.defineProperty(instance, key, {
-        value: this.resolve(depToken),
+        value: this.#innerResolve(depToken, requestMap),
         writable: true,
       });
     }
 
-    scope?.set(ctx.token, instance);
+    scope?.set(token, instance);
     return instance;
   }
 }

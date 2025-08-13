@@ -19,7 +19,6 @@
     "exactOptionalPropertyTypes": true,
     "strict": true,
     "isolatedModules": true,
-    "skipLibCheck": true,
- }
-
-
+    "skipLibCheck": true
+  }
+}

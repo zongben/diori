@@ -2,7 +2,7 @@
   "name": "diori",
   "version": "1.0.0",
   "scripts": {
-    "start": "tsx ./main.ts"
+    "start": "tsx ./tests/main.ts"
   },
   "type": "commonjs",
   "devDependencies": {
