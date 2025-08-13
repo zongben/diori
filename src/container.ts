@@ -8,10 +8,10 @@ export type Newable<
 type ScopeType = "transient" | "request" | "singleton";
 
 type DepContext = {
-  ctor: Newable;
-  type: ScopeType;
+  type: ScopeType | "constant";
   dep: symbol[];
   cycleChecked: boolean;
+  ctor?: Newable;
 };
 
 type Identifier = symbol | Newable;
@@ -81,14 +81,27 @@ export class Container {
 
   addTransient(token: symbol, ctor: Newable) {
     this.#register(token, ctor, "transient");
+    return this;
   }
 
   addRequest(token: symbol, ctor: Newable) {
     this.#register(token, ctor, "request");
+    return this;
   }
 
   addSingleton(token: symbol, ctor: Newable) {
     this.#register(token, ctor, "singleton");
+    return this;
+  }
+
+  addConstant(token: symbol, instance: any) {
+    this.#map.set(token, {
+      type: "constant",
+      cycleChecked: true,
+      dep: [],
+    });
+    this.#singletonMap.set(token, instance);
+    return this;
   }
 
   resolve<T = unknown>(token: symbol): T {
@@ -100,13 +113,16 @@ export class Container {
     if (!ctx) throw Error(`${String(token)} is not registered`);
 
     const scope =
-      ctx.type === "singleton"
+      ctx.type === "singleton" || ctx.type === "constant"
         ? this.#singletonMap
         : ctx.type === "request"
           ? requestMap
           : undefined;
 
     if (scope?.has(token)) return scope.get(token);
+
+    if (!ctx.ctor)
+      throw new Error(`${String(token)} is missing Newable Constructor`);
 
     const instance = new ctx.ctor();
     for (const [key, m] of Object.entries(ctx.ctor[Symbol.metadata] ?? {})) {

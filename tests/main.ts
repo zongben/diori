@@ -4,6 +4,7 @@ const TOKEN = {
   logger: Symbol("logger"),
   depA: Symbol("A"),
   depB: Symbol("B"),
+  depC: Symbol("C"),
   service: Symbol("Service"),
 };
 
@@ -13,16 +14,8 @@ class Logger {
   }
 }
 
-class DepC {
-  index: number = 0;
-
-  get() {
-    console.log(this.index++);
-  }
-}
-
 class DepA {
-  @Inject(DepC, "request")
+  @Inject(TOKEN.depC)
   depC!: DepC;
 
   execA() {
@@ -32,12 +25,20 @@ class DepA {
 }
 
 class DepB {
-  @Inject(DepC, "request")
+  @Inject(TOKEN.depC)
   depC!: DepC;
 
   execB() {
     console.log("B exec");
     this.depC.get();
+  }
+}
+
+class DepC {
+  index: number = 0;
+
+  get() {
+    console.log(this.index++);
   }
 }
 
@@ -59,6 +60,7 @@ container.addTransient(TOKEN.logger, Logger);
 container.addTransient(TOKEN.service, LogService);
 container.addTransient(TOKEN.depA, DepA);
 container.addTransient(TOKEN.depB, DepB);
+container.addConstant(TOKEN.depC, new DepC());
 
 const svc = container.resolve<LogService>(TOKEN.service);
 svc.exec();
