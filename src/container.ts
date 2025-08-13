@@ -38,6 +38,21 @@ export class Container {
       .map((m) => m.token);
   }
 
+  #getAllMetadata(ctor: Function) {
+    const result: Record<string | symbol, any> = {};
+
+    let current: any = ctor;
+    while (current && current !== Object) {
+      const meta = current[Symbol.metadata];
+      if (meta) {
+        Object.assign(result, meta);
+      }
+      current = Object.getPrototypeOf(current);
+    }
+
+    return result;
+  }
+
   #depCycleDetect() {
     const visited = new Set<symbol>();
     const stack = new Set<symbol>();
@@ -105,7 +120,7 @@ export class Container {
   }
 
   resolve<T = unknown>(token: symbol): T {
-    return this.#innerResolve(token, new Map<symbol, any>());
+    return this.#innerResolve(token, new Map());
   }
 
   #innerResolve(token: symbol, requestMap: Map<symbol, any>) {
@@ -125,7 +140,7 @@ export class Container {
       throw new Error(`${String(token)} is missing Newable Constructor`);
 
     const instance = new ctx.ctor();
-    for (const [key, m] of Object.entries(ctx.ctor[Symbol.metadata] ?? {})) {
+    for (const [key, m] of Object.entries(this.#getAllMetadata(ctx.ctor))) {
       const meta = m as MetaData;
       if (meta.idType === "Newable" && !this.#map.has(meta.token)) {
         const { ctor, scope, token } = meta;
@@ -157,5 +172,15 @@ export function Inject(identifier: Identifier, scope?: ScopeType) {
             scope: scope ?? "transient",
           };
     ctx.metadata[ctx.name] = meta;
+  };
+}
+
+export function ClassFactory(factory?: () => Object) {
+  return (value: any) => {
+    return class extends value {
+      constructor(args: any[]) {
+        super(factory ? (args ?? factory()) : args);
+      }
+    } as any;
   };
 }

@@ -1,4 +1,4 @@
-import { Container, Inject } from "../src/container";
+import { ClassFactory, Container, Inject } from "../src/container";
 
 const TOKEN = {
   logger: Symbol("logger"),
@@ -9,28 +9,52 @@ const TOKEN = {
 };
 
 class Logger {
+  name!: string;
+
   log() {
     console.log("logger log");
   }
 }
 
-class DepA {
-  @Inject(TOKEN.depC)
-  depC!: DepC;
+const DepBFactory = () => {
+  return {
+    id: 456,
+  };
+};
 
-  execA() {
-    console.log("A exec");
-    this.depC.get();
-  }
-}
-
+@ClassFactory(DepBFactory)
 class DepB {
   @Inject(TOKEN.depC)
   depC!: DepC;
 
+  id: number;
+
+  constructor({ id }: ReturnType<typeof DepBFactory>) {
+    this.id = id;
+  }
+
   execB() {
-    console.log("B exec");
+    console.log("B exec, id is:", this.id);
     this.depC.get();
+  }
+}
+
+const DepAFactory = () => {
+  return {
+    id: 123,
+    name: "test",
+  };
+};
+
+@ClassFactory(DepAFactory)
+class DepA extends DepB {
+  constructor({ id }: ReturnType<typeof DepAFactory>) {
+    super({ id });
+  }
+
+  execA() {
+    console.log("A exec");
+    this.execB();
   }
 }
 
