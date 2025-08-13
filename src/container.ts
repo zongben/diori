@@ -14,9 +14,19 @@ type DepContext = {
   cycleChecked: boolean;
 };
 
-type MetaData = {
-  token: symbol;
-};
+type Identifier = symbol | Newable;
+
+type MetaData =
+  | {
+      idType: "symbol";
+      token: symbol;
+    }
+  | {
+      idType: "Newable";
+      token: symbol;
+      ctor: Newable;
+      scope: ScopeType;
+    };
 
 export class Container {
   #map = new Map<symbol, DepContext>();
@@ -99,12 +109,18 @@ export class Container {
     if (scope?.has(token)) return scope.get(token);
 
     const instance = new ctx.ctor();
-    const meta = ctx.ctor[Symbol.metadata] ?? {};
-    for (const [key, m] of Object.entries(meta)) {
-      const depToken = (m as MetaData).token;
+    for (const [key, m] of Object.entries(ctx.ctor[Symbol.metadata] ?? {})) {
+      const meta = m as MetaData;
+      if (meta.idType === "Newable" && !this.#map.has(meta.token)) {
+        const { ctor, scope, token } = meta;
+        scope === "singleton"
+          ? this.addSingleton(token, ctor)
+          : scope === "request"
+            ? this.addRequest(token, ctor)
+            : this.addTransient(token, ctor);
+      }
       Object.defineProperty(instance, key, {
-        value: this.#innerResolve(depToken, requestMap),
-        writable: true,
+        value: this.#innerResolve(meta.token, requestMap),
       });
     }
 
@@ -113,10 +129,17 @@ export class Container {
   }
 }
 
-export function Inject(token: symbol) {
+export function Inject(identifier: Identifier, scope?: ScopeType) {
   return (_: undefined, ctx: ClassFieldDecoratorContext) => {
-    ctx.metadata[ctx.name] = {
-      token,
-    };
+    const meta: MetaData =
+      typeof identifier === "symbol"
+        ? { idType: "symbol", token: identifier }
+        : {
+            idType: "Newable",
+            token: Symbol.for(identifier.name),
+            ctor: identifier,
+            scope: scope ?? "transient",
+          };
+    ctx.metadata[ctx.name] = meta;
   };
 }
